@@ -1,0 +1,23 @@
+[project]
+name = "collection-email"
+version = "0.1.0"
+description = "邮件定时发送与回复追踪系统"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.29.0",
+    "sqlalchemy>=2.0.0",
+    "apscheduler>=3.10.0",
+    "cryptography>=42.0.0",
+    "python-multipart>=0.0.9",
+    "httpx>=0.27.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "hypothesis>=6.100.0",
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["app/tests"]

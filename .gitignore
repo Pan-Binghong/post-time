@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+build/
+dist/
+wheels/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.hypothesis/
+
+# Secrets & data
+.fernet_key
+*.db
+uploads/
+example_eml/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# IDE / tools
+.vscode/
+.idea/
+.claude/
+.kiro/
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Env
+.env
+.env.*
+.python-version
