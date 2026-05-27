@@ -1,35 +1,25 @@
-"""Auto-migration: detect missing columns in SQLite and ALTER TABLE to add them.
+"""自动迁移：检测 ORM 模型与数据库 Schema 的差异，补充缺失的列。
 
-Uses raw sqlite3 PRAGMA to avoid SQLAlchemy inspector caching issues.
-Called during app startup after init_db().
+使用 SQLAlchemy inspect() 实现，兼容 SQLite 和 PostgreSQL。
+在应用启动时（init_db 之后）调用。
 """
 
 import logging
-import sqlite3
 
-from sqlalchemy import Column
-from app.database import Base, DATABASE_URL
+from sqlalchemy import inspect, text
+from sqlalchemy.exc import OperationalError
+
+from app.database import Base, engine
 
 logger = logging.getLogger(__name__)
 
-_TYPE_MAP = {
-    "VARCHAR": "VARCHAR",
-    "STRING": "VARCHAR",
-    "TEXT": "TEXT",
-    "INTEGER": "INTEGER",
-    "DATETIME": "DATETIME",
-    "JSON": "TEXT",
-    "BOOLEAN": "BOOLEAN",
-    "FLOAT": "FLOAT",
-}
+
+def _sql_type(col) -> str:
+    """将 SQLAlchemy 列类型编译为当前方言的 SQL 类型字符串。"""
+    return col.type.compile(dialect=engine.dialect)
 
 
-def _sql_type(col: Column) -> str:
-    type_name = type(col.type).__name__.upper()
-    return _TYPE_MAP.get(type_name, "TEXT")
-
-
-def _default_clause(col: Column) -> str:
+def _default_clause(col) -> str:
     if col.default is not None:
         arg = col.default.arg
         if callable(arg):
@@ -47,31 +37,27 @@ def _default_clause(col: Column) -> str:
 
 
 def auto_migrate():
-    """Compare ORM models with actual SQLite schema, add missing columns."""
-    # Extract the file path from the SQLAlchemy URL (sqlite:///./path or sqlite:///path)
-    db_path = DATABASE_URL.split("///", 1)[1]
-    conn = sqlite3.connect(db_path)
-    try:
-        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        existing_tables = {row[0] for row in cursor.fetchall()}
+    """对比 ORM 模型与数据库实际 Schema，补充缺失的列。"""
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
 
-        for table_name, table in Base.metadata.tables.items():
-            if table_name not in existing_tables:
+    for table_name, table in Base.metadata.tables.items():
+        if table_name not in existing_tables:
+            continue
+
+        existing_cols = {col["name"] for col in inspector.get_columns(table_name)}
+
+        for col in table.columns:
+            if col.name in existing_cols:
                 continue
 
-            cursor = conn.execute(f"PRAGMA table_info({table_name})")
-            existing_cols = {row[1] for row in cursor.fetchall()}
-
-            for col in table.columns:
-                if col.name in existing_cols:
-                    continue
-
-                sql_type = _sql_type(col)
-                default = _default_clause(col)
-                stmt = f"ALTER TABLE {table_name} ADD COLUMN {col.name} {sql_type} {default}"
-                logger.info("Auto-migrate: %s", stmt)
-                conn.execute(stmt)
-                conn.commit()
-                logger.info("Added column %s.%s", table_name, col.name)
-    finally:
-        conn.close()
+            sql_type = _sql_type(col)
+            default = _default_clause(col)
+            stmt = f"ALTER TABLE {table_name} ADD COLUMN {col.name} {sql_type} {default}"
+            try:
+                with engine.connect() as conn:
+                    conn.execute(text(stmt))
+                    conn.commit()
+                logger.info("Auto-migrate: 新增列 %s.%s", table_name, col.name)
+            except OperationalError as e:
+                logger.warning("Auto-migrate 失败 %s.%s: %s", table_name, col.name, e)

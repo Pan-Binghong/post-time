@@ -7,6 +7,30 @@ import type {
 
 const client = axios.create({ baseURL: "/api" });
 
+// 请求拦截：自动携带 Bearer token
+client.interceptors.request.use(config => {
+  const token = localStorage.getItem("auth_token");
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+// 响应拦截：401 自动清除 token 并刷新页面到登录
+client.interceptors.response.use(
+  res => res,
+  err => {
+    if (err.response?.status === 401) {
+      localStorage.removeItem("auth_token");
+      window.location.reload();
+    }
+    return Promise.reject(err);
+  }
+);
+
+// Auth
+export const login = (username: string, password: string) =>
+  axios.post<{ access_token: string; token_type: string }>("/api/auth/login", { username, password })
+    .then(r => r.data);
+
 // Credentials
 export const fetchCredentialList = () =>
   client.get<CredentialItem[]>("/credentials/list").then(r => r.data);

@@ -5,10 +5,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.jobstores.memory import MemoryJobStore
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal
+from app.database import DATABASE_URL, SessionLocal
 from app.models.models import Recipient, ReplyRecord, ScheduledTask, SendRecord, Template
 
 BJT = timezone(timedelta(hours=8))
@@ -39,7 +39,11 @@ _scheduler: BackgroundScheduler | None = None
 def get_scheduler() -> BackgroundScheduler:
     global _scheduler
     if _scheduler is None:
-        _scheduler = BackgroundScheduler(jobstores={"default": MemoryJobStore()})
+        _scheduler = BackgroundScheduler(
+            jobstores={"default": SQLAlchemyJobStore(url=DATABASE_URL)},
+            # 应用重启后，1 小时内错过的任务仍会补跑
+            job_defaults={"misfire_grace_time": 3600},
+        )
     return _scheduler
 
 
@@ -285,6 +289,10 @@ def execute_task(db: Session, task_id: int) -> TaskExecutionSummary:
 def _execute_task_job(task_id: int) -> None:
     db = SessionLocal()
     try:
+        # APScheduler 持久化后重启可能重放已完成的任务，此处做幂等守卫
+        task = db.query(ScheduledTask).filter(ScheduledTask.id == task_id).first()
+        if task and task.status == "completed":
+            return
         execute_task(db, task_id)
     finally:
         db.close()

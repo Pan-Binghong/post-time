@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { ConfigProvider, Layout, Menu, theme } from "antd";
+import { ConfigProvider, Layout, Menu, Button, theme } from "antd";
 import {
   DashboardOutlined,
   ContactsOutlined,
   SettingOutlined,
   MailOutlined,
   AppstoreAddOutlined,
+  LogoutOutlined,
 } from "@ant-design/icons";
 import zhCN from "antd/locale/zh_CN";
 import Dashboard from "./Dashboard";
@@ -13,6 +14,7 @@ import Settings from "./Settings";
 import Contacts from "./Contacts";
 import TaskConfig from "./TaskConfig";
 import CustomTaskTypes from "./CustomTaskTypes";
+import Login from "./Login";
 import "./App.css";
 
 const { Header, Content } = Layout;
@@ -25,7 +27,21 @@ type Page =
   | { type: "taskConfig"; taskTypeId: number; taskTypeName: string };
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem("auth_token"));
   const [page, setPage] = useState<Page>({ type: "dashboard" });
+
+  const handleLogout = () => {
+    localStorage.removeItem("auth_token");
+    setIsAuthenticated(false);
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <ConfigProvider locale={zhCN} theme={{ algorithm: theme.defaultAlgorithm }}>
+        <Login onSuccess={() => setIsAuthenticated(true)} />
+      </ConfigProvider>
+    );
+  }
 
   const activeKey = page.type === "taskConfig" ? "dashboard" : page.type === "customTasks" ? "customTasks" : page.type;
 
@@ -72,6 +88,15 @@ export default function App() {
             ]}
             onClick={({ key }) => setPage({ type: key as "dashboard" | "contacts" | "customTasks" | "settings" })}
           />
+
+          <Button
+            type="text"
+            icon={<LogoutOutlined />}
+            onClick={handleLogout}
+            style={{ color: "#8c8c8c", flexShrink: 0 }}
+          >
+            退出
+          </Button>
         </Header>
 
         <Content style={{ padding: "24px", maxWidth: 1600, margin: "0 auto", width: "100%" }}>
