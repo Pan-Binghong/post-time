@@ -104,3 +104,10 @@ export interface LocationEmail {
 export interface PreviewResponse {
   emails: LocationEmail[];
 }
+
+export interface ReplyCheckResponse {
+  task_id: number;
+  detections: { send_record_id: number; matched: boolean; reply_date: string | null }[];
+  flagged_count: number;
+  newly_matched_count: number;
+}

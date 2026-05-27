@@ -1,6 +1,7 @@
-"""AI Chat API — 代理转发到 qwen3，支持流式 SSE 输出。"""
+"""AI Chat API — 代理转发到兼容 OpenAI 接口的大模型，支持流式 SSE 输出。"""
 
 import json
+import os
 import httpx
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -8,9 +9,9 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
-AI_BASE_URL = "http://120.26.33.228:9997/v1"
-AI_MODEL = "qwen3"
-AI_API_KEY = "1"
+AI_BASE_URL = os.environ["AI_BASE_URL"]
+AI_MODEL = os.environ["AI_MODEL"]
+AI_API_KEY = os.environ["AI_API_KEY"]
 
 SYSTEM_PROMPT = """\
 你是一个专业的商务邮件助手。用户会描述他们想要的邮件内容，你的任务是生成一封完整的邮件。

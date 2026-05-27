@@ -71,9 +71,9 @@ def preview_patent_email(req: PatentPreviewRequest, db: Session = Depends(get_db
     sd = sched.strftime("%Y.%m.%d")
 
     groups: dict[str, list] = defaultdict(list)
-    if task_type_name == "按季度发送知识产权数据统计支持":
+    if task_type_name == "按季度发送数据统计支持":
         # 所有 TO 收件人归入选定地区，不按通讯录字段过滤
-        loc_label = req.group_by  # 此时 group_by 字段复用传递地区名（药源/重庆）
+        loc_label = req.group_by  # group_by 字段复用传递地区名
         for r in to_list:
             groups[loc_label].append(r)
     else:
@@ -82,7 +82,7 @@ def preview_patent_email(req: PatentPreviewRequest, db: Session = Depends(get_db
 
     emails = []
     for key, group in groups.items():
-        if task_type_name == "按季度发送知识产权数据统计支持":
+        if task_type_name == "按季度发送数据统计支持":
             content = generate_ip_stats_email(
                 location=key,
                 year=yr,

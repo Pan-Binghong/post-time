@@ -5,15 +5,17 @@ summary statistics, and report export.
 Requirements: 6.1, 6.2, 6.3, 6.5
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.models import (
+    Contact,
     Recipient,
     ReplyRecord,
     SendRecord,
@@ -21,6 +23,8 @@ from app.models.models import (
 )
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+
+_BJT = timezone(timedelta(hours=8))
 
 
 # --- Pydantic response models ---
@@ -75,70 +79,66 @@ class ExportReport(BaseModel):
 
 # --- Helper functions ---
 
-def _get_recipient_status(db: Session, recipient: Recipient) -> RecipientStatus:
-    """Build a RecipientStatus for a single recipient by looking up their
-    most recent send record and associated reply record."""
-    send_record = (
-        db.query(SendRecord)
-        .filter(SendRecord.recipient_id == recipient.id)
-        .order_by(SendRecord.sent_at.desc())
-        .first()
+def _compute_stats(db: Session, task_type_id: int) -> dict:
+    """Compute reply stats using a single aggregation query (no N+1)."""
+    latest_sr = (
+        db.query(func.max(SendRecord.id).label("latest_id"))
+        .join(Recipient, SendRecord.recipient_id == Recipient.id)
+        .filter(Recipient.task_type_id == task_type_id)
+        .group_by(SendRecord.recipient_id)
+        .subquery()
     )
-
-    send_status = send_record.send_status if send_record else None
-    reply_status = None
-    reply_timestamp = None
-
-    if send_record:
-        reply_record = (
-            db.query(ReplyRecord)
-            .filter(ReplyRecord.send_record_id == send_record.id)
-            .first()
-        )
-        if reply_record:
-            reply_status = reply_record.reply_status
-            if reply_record.replied_at:
-                reply_timestamp = reply_record.replied_at.isoformat()
-
-    return RecipientStatus(
-        recipient_id=recipient.id,
-        name=recipient.contact.name,
-        email=recipient.contact.email,
-        send_status=send_status,
-        reply_status=reply_status,
-        reply_timestamp=reply_timestamp,
-    )
-
-
-def _compute_stats(db: Session, task_type: TaskType) -> dict:
-    """Compute replied / not_replied counts for a task type.
-    只统计有实际发送记录的收件人，避免删除任务后仍显示残留数据。
-    """
-    recipients = (
-        db.query(Recipient)
-        .filter(Recipient.task_type_id == task_type.id)
+    rows = (
+        db.query(ReplyRecord.reply_status, func.count().label("cnt"))
+        .join(latest_sr, ReplyRecord.send_record_id == latest_sr.c.latest_id)
+        .group_by(ReplyRecord.reply_status)
         .all()
     )
-
-    replied = 0
-    not_replied = 0
-    total = 0
-
-    for r in recipients:
-        status = _get_recipient_status(db, r)
-        if status.send_status is None:   # 从未发送过，跳过
-            continue
-        total += 1
-        if status.reply_status == "replied":
-            replied += 1
-        else:
-            not_replied += 1
-
+    replied = sum(cnt for status, cnt in rows if status == "replied")
+    total = sum(cnt for _, cnt in rows)
     return {
         "total_recipients": total,
         "replied_count": replied,
-        "not_replied_count": not_replied,
+        "not_replied_count": total - replied,
     }
+
+
+def _load_recipient_statuses(db: Session, task_type_id: int) -> list[RecipientStatus]:
+    """Load all recipients with their latest send/reply status using a single JOIN query."""
+    latest_sr = (
+        db.query(
+            SendRecord.recipient_id.label("rid"),
+            func.max(SendRecord.id).label("latest_id"),
+        )
+        .group_by(SendRecord.recipient_id)
+        .subquery()
+    )
+    rows = (
+        db.query(Recipient, Contact, SendRecord, ReplyRecord)
+        .join(Contact, Recipient.contact_id == Contact.id)
+        .outerjoin(latest_sr, Recipient.id == latest_sr.c.rid)
+        .outerjoin(SendRecord, SendRecord.id == latest_sr.c.latest_id)
+        .outerjoin(ReplyRecord, ReplyRecord.send_record_id == SendRecord.id)
+        .filter(Recipient.task_type_id == task_type_id)
+        .all()
+    )
+    result = []
+    for recipient, contact, send_record, reply_record in rows:
+        if send_record is None:
+            continue
+        result.append(RecipientStatus(
+            recipient_id=recipient.id,
+            name=contact.name,
+            email=contact.email,
+            send_status=send_record.send_status,
+            reply_status=reply_record.reply_status if reply_record else None,
+            reply_timestamp=(
+                reply_record.replied_at.isoformat()
+                if reply_record and reply_record.replied_at
+                else None
+            ),
+        ))
+    return result
 
 
 # --- Endpoints ---
@@ -147,14 +147,14 @@ def _compute_stats(db: Session, task_type: TaskType) -> dict:
 def get_dashboard(db: Session = Depends(get_db)):
     """Overview of all task types with summary statistics.
 
-    Requirement 6.1: Display all 3 Task_Types with Reply_Status indicators.
+    Requirement 6.1: Display all Task_Types with Reply_Status indicators.
     Requirement 6.2: Show summary statistics for each Task_Type.
     """
     task_types = db.query(TaskType).all()
     summaries: list[TaskTypeSummary] = []
 
     for tt in task_types:
-        stats = _compute_stats(db, tt)
+        stats = _compute_stats(db, tt.id)
         summaries.append(TaskTypeSummary(
             task_type_id=tt.id,
             name=tt.name,
@@ -176,24 +176,15 @@ def export_dashboard(db: Session = Depends(get_db)):
     details: list[TaskTypeDetail] = []
 
     for tt in task_types:
-        recipients = (
-            db.query(Recipient)
-            .filter(Recipient.task_type_id == tt.id)
-            .all()
-        )
-        recipient_statuses = [
-            s for r in recipients
-            if (s := _get_recipient_status(db, r)).send_status is not None
-        ]
         details.append(TaskTypeDetail(
             task_type_id=tt.id,
             name=tt.name,
             description=tt.description or "",
-            recipients=recipient_statuses,
+            recipients=_load_recipient_statuses(db, tt.id),
         ))
 
     return ExportReport(
-        exported_at=datetime.utcnow().isoformat(),
+        exported_at=datetime.now(_BJT).replace(tzinfo=None).isoformat(),
         task_types=details,
     )
 
@@ -209,22 +200,11 @@ def get_task_type_detail(task_type_id: int, db: Session = Depends(get_db)):
     if tt is None:
         return JSONResponse(status_code=404, content={"detail": "Task type not found"})
 
-    recipients = (
-        db.query(Recipient)
-        .filter(Recipient.task_type_id == task_type_id)
-        .all()
-    )
-    # 只展示有实际发送记录的收件人
-    recipient_statuses = [
-        s for r in recipients
-        if (s := _get_recipient_status(db, r)).send_status is not None
-    ]
-
     return TaskTypeDetail(
         task_type_id=tt.id,
         name=tt.name,
         description=tt.description or "",
-        recipients=recipient_statuses,
+        recipients=_load_recipient_statuses(db, task_type_id),
     )
 
 
@@ -238,7 +218,7 @@ def get_task_type_stats(task_type_id: int, db: Session = Depends(get_db)):
     if tt is None:
         return JSONResponse(status_code=404, content={"detail": "Task type not found"})
 
-    stats = _compute_stats(db, tt)
+    stats = _compute_stats(db, task_type_id)
 
     return StatsResponse(
         task_type_id=tt.id,

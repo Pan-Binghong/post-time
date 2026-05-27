@@ -19,7 +19,7 @@ import { PLACEHOLDER_META } from "./HighlightedTextarea";
 
 const { Text } = Typography;
 
-const BUILTIN_NAMES = new Set(["按季度发送专利素材收集", "按季度发送知识产权数据统计支持"]);
+const BUILTIN_NAMES = new Set(["按季度发送文档收集", "按季度发送数据统计支持"]);
 
 
 export default function CustomTaskTypes({

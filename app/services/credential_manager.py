@@ -1,8 +1,4 @@
-"""Credential Manager for Email_Scheduler.
-
-Handles SMTP credential authentication, encrypted storage, loading, and masking.
-Requirements: 1.1, 1.2, 1.3, 1.4
-"""
+"""SMTP 凭证管理：加密存储、读取、校验。"""
 
 import os
 import smtplib
@@ -12,10 +8,7 @@ from cryptography.fernet import Fernet
 from sqlalchemy.orm import Session
 
 from app.models.models import Credentials
-
-# 163 enterprise SMTP server settings
-SMTP_HOST = "smtp.qiye.163.com"
-SMTP_PORT = 994
+from app.services.provider_registry import SmtpConfig, resolve_smtp_config
 
 
 @dataclass
@@ -43,17 +36,31 @@ def _get_fernet() -> Fernet:
     return Fernet(_get_or_create_key())
 
 
+def connect_smtp(smtp_config: SmtpConfig, timeout: int = 10) -> smtplib.SMTP:
+    """按配置建立 SMTP 连接（SSL 或 STARTTLS）。"""
+    if smtp_config.use_ssl:
+        return smtplib.SMTP_SSL(smtp_config.host, smtp_config.port, timeout=timeout)
+    server = smtplib.SMTP(smtp_config.host, smtp_config.port, timeout=timeout)
+    server.ehlo()
+    server.starttls()
+    server.ehlo()
+    return server
+
+
 def authenticate(email: str, smtp_code: str) -> AuthResult:
-    """Authenticate credentials against the 163 enterprise SMTP server.
+    """校验 SMTP 凭证，自动根据邮件域名选择服务器。
 
     Requirement 1.1: Authenticate and report the result.
     Requirement 1.3: Display specific error on failure.
     """
     try:
-        server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=10)
+        smtp_config = resolve_smtp_config(email)
+        server = connect_smtp(smtp_config)
         server.login(email, smtp_code)
         server.quit()
         return AuthResult(success=True, message="Authentication successful.")
+    except ValueError as e:
+        return AuthResult(success=False, message=str(e))
     except smtplib.SMTPAuthenticationError as e:
         return AuthResult(success=False, message=f"Authentication failed: invalid credentials. {e.smtp_error}")
     except smtplib.SMTPConnectError as e:

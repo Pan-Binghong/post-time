@@ -154,11 +154,12 @@ def execute_task(db: Session, task_id: int) -> TaskExecutionSummary:
     cc_list = [r for r in all_recipients if r.role == "cc"]
 
     # 如果 task_config 里有 group_key，按分组维度过滤 TO 收件人
-    # 知识产权数据统计任务：group_key 仅作为邮件标题地区标签，不过滤收件人
+    # ip_stats 任务：group_key 仅作为邮件标题地区标签，不过滤收件人
     group_key = config.get("group_key", "")
     group_by = config.get("group_by", "location")
-    # 只有任务1按地区过滤收件人；任务2和自定义任务 group_key 仅作标签用
-    is_patent_task = task_type and task_type.name == "按季度发送专利素材收集"
+    type_key = task_type.type_key if task_type else None
+    # 只有 patent 任务按地区过滤收件人；ip_stats 和自定义任务 group_key 仅作标签用
+    is_patent_task = type_key == "patent"
     if group_key and is_patent_task:
         def _get_field(r: Recipient) -> str:
             c = r.contact
@@ -204,7 +205,7 @@ def execute_task(db: Session, task_id: int) -> TaskExecutionSummary:
         body_plain = ""
         body_html = None
 
-        if task_type and task_type.name == "按季度发送专利素材收集":
+        if type_key == "patent":
             # 年份和季度从 scheduled_time 自动推算
             auto_year = task.scheduled_time.year
             auto_quarter = quarter_from_month(task.scheduled_time.month)
@@ -220,7 +221,7 @@ def execute_task(db: Session, task_id: int) -> TaskExecutionSummary:
             subject = content.subject
             body_plain = content.body_plain
             body_html = content.body_html
-        elif task_type and task_type.name == "按季度发送知识产权数据统计支持":
+        elif type_key == "ip_stats":
             from app.services.ip_stats_template import generate_ip_stats_email
             auto_year = task.scheduled_time.year
             auto_quarter = quarter_from_month(task.scheduled_time.month)
@@ -290,23 +291,16 @@ def _execute_task_job(task_id: int) -> None:
 
 
 def check_all_replies_job() -> None:
-    """定时任务：扫描所有已发送任务的回复状态。"""
+    """定时任务：扫描所有已发送任务的回复状态（IMAP 连接只开一次）。"""
     from app.services.credential_manager import load_credentials
-    from app.services.reply_checker import check_replies, flag_pending_follow_ups
-    from app.models.models import ScheduledTask
+    from app.services.reply_checker import check_all_tasks_replies
 
     db = SessionLocal()
     try:
         credentials = load_credentials(db)
         if credentials is None:
             return
-        tasks = db.query(ScheduledTask).filter(ScheduledTask.status == "completed").all()
-        for task in tasks:
-            try:
-                check_replies(db, credentials, task.id)
-                flag_pending_follow_ups(db, task.id)
-            except Exception:
-                pass
+        check_all_tasks_replies(db, credentials)
     finally:
         db.close()
 

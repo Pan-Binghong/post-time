@@ -12,6 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
 from app.models.models import (
+    Contact,
     ReplyRecord,
     ScheduledTask,
     SendRecord,
@@ -47,7 +48,11 @@ def _seed_full_chain(db, sent_at=None):
     db.add(tmpl)
     db.flush()
 
-    recipient = Recipient(task_type_id=tt.id, name="Test", email="test@example.com")
+    contact = Contact(name="Test", email="test@example.com")
+    db.add(contact)
+    db.flush()
+
+    recipient = Recipient(task_type_id=tt.id, contact_id=contact.id)
     db.add(recipient)
     db.flush()
 

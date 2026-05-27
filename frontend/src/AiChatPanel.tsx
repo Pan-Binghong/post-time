@@ -17,9 +17,9 @@ interface Props {
 }
 
 const SUGGESTIONS = [
-  "按季度收集知识产权数据，截止日发件后10个工作日",
-  "季度专利素材收集，附件为空白表，10个工作日截止",
-  "通知各部门更新Q{{quarter}}知识产权统计表",
+  "按季度收集各部门工作数据，截止日发件后10个工作日",
+  "季度文档收集，附件为空白表，10个工作日截止",
+  "通知各部门更新Q{{quarter}}季度统计表",
 ];
 
 export default function AiChatPanel({ onApply }: Props) {

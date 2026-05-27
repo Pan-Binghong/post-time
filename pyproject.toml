@@ -21,3 +21,9 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["app/tests"]
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.152.1",
+    "pytest>=9.0.3",
+]

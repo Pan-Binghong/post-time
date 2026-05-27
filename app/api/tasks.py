@@ -1,5 +1,6 @@
 """Task API — 按分组独立定时。"""
 
+import contextlib
 import json
 import os
 from datetime import datetime, timezone, timedelta
@@ -46,6 +47,7 @@ class ReplyCheckResponse(BaseModel):
     task_id: int
     detections: list[dict]
     flagged_count: int
+    newly_matched_count: int = 0
 
 
 def _task_to_response(t: ScheduledTask) -> TaskResponse:
@@ -187,13 +189,24 @@ def delete_task(task_id: int, db: Session = Depends(get_db)):
     task = db.query(ScheduledTask).filter(ScheduledTask.id == task_id).first()
     if task is None:
         return JSONResponse(status_code=404, content={"detail": "任务不存在"})
-    # 取消 APScheduler 中的待执行 job
     if task.status == "pending":
         from app.services.task_scheduler import get_scheduler
         try:
             get_scheduler().remove_job(f"task_{task.id}")
         except Exception:
             pass
+    if task.attachments:
+        # 只删除没有被其他任务引用的附件文件
+        still_referenced = {
+            p
+            for t in db.query(ScheduledTask).filter(ScheduledTask.id != task_id).all()
+            if t.attachments
+            for p in t.attachments
+        }
+        for path in task.attachments:
+            if path not in still_referenced:
+                with contextlib.suppress(OSError):
+                    os.remove(path)
     db.delete(task)
     db.commit()
 
@@ -248,4 +261,5 @@ def check_task_replies(task_id: int, db: Session = Depends(get_db)):
             for d in detections
         ],
         flagged_count=len(flagged),
+        newly_matched_count=sum(1 for d in detections if d.newly_matched),
     )

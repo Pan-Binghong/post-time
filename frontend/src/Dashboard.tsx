@@ -7,7 +7,7 @@ import {
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { fetchDashboardOverview, fetchTaskTypeDetail, fetchExportReport, fetchTasks, checkTaskReplies } from "./api";
-import type { TaskTypeSummary, TaskTypeDetail, RecipientStatus } from "./types";
+import type { TaskTypeSummary, TaskTypeDetail, RecipientStatus, ReplyCheckResponse } from "./types";
 
 const { Title, Text } = Typography;
 const AUTO_REFRESH = 30_000;
@@ -105,7 +105,7 @@ export default function Dashboard({
       const results = await Promise.allSettled(completedIds.map(id => checkTaskReplies(id)));
       const matched = results
         .filter(r => r.status === "fulfilled")
-        .reduce((sum, r) => sum + (r as PromiseFulfilledResult<{ detections: { matched: boolean }[] }>).value.detections.filter(d => d.matched).length, 0);
+        .reduce((sum, r) => sum + (r as PromiseFulfilledResult<ReplyCheckResponse>).value.newly_matched_count, 0);
       msg.success(`检查完成，共发现 ${matched} 条新回复`);
     } catch {
       msg.error("检查回复时发生错误");

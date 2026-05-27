@@ -48,6 +48,7 @@ class TaskType(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     description = Column(Text, default="")
+    type_key = Column(String, nullable=True)
     template_id = Column(Integer, ForeignKey("templates.id"), nullable=True)
     created_at = Column(DateTime, default=_now_bj)
 

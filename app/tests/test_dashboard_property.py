@@ -12,27 +12,18 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
 from app.models.models import (
+    Contact,
     Recipient,
     ReplyRecord,
-    SendRecord,
     ScheduledTask,
+    SendRecord,
     TaskType,
     Template,
 )
-from app.api.dashboard import _compute_stats, _get_recipient_status
+from app.api.dashboard import _compute_stats, _load_recipient_statuses
 
 
 # --- Strategies ---
-
-recipient_name_st = st.text(
-    alphabet=st.characters(whitelist_categories=("L", "N"), min_codepoint=48, max_codepoint=122),
-    min_size=1,
-    max_size=20,
-)
-
-email_local_st = st.from_regex(r"[a-z][a-z0-9]{0,10}", fullmatch=True)
-email_domain_st = st.from_regex(r"[a-z]{2,6}\.[a-z]{2,4}", fullmatch=True)
-valid_email_st = st.builds(lambda l, d: f"{l}@{d}", email_local_st, email_domain_st)
 
 reply_status_st = st.sampled_from(["replied", "not_replied", "pending_follow_up"])
 
@@ -46,10 +37,7 @@ def _make_session():
 
 
 def _seed_task_type_with_recipients(db, num_recipients, reply_statuses):
-    """Create a task type with recipients, send records, and reply records.
-
-    reply_statuses is a list of status strings, one per recipient.
-    """
+    """Create a task type with contacts, recipients, send records, and reply records."""
     tt = TaskType(name="TestType", description="desc")
     db.add(tt)
     db.flush()
@@ -68,11 +56,11 @@ def _seed_task_type_with_recipients(db, num_recipients, reply_statuses):
     db.flush()
 
     for i, status in enumerate(reply_statuses):
-        r = Recipient(
-            task_type_id=tt.id,
-            name=f"User{i}",
-            email=f"user{i}@test.com",
-        )
+        contact = Contact(name=f"User{i}", email=f"user{i}@test.com")
+        db.add(contact)
+        db.flush()
+
+        r = Recipient(task_type_id=tt.id, contact_id=contact.id)
         db.add(r)
         db.flush()
 
@@ -109,17 +97,13 @@ def test_dashboard_summary_statistics_consistency(statuses: list[str]):
     db = _make_session()
     try:
         tt = _seed_task_type_with_recipients(db, len(statuses), statuses)
-        stats = _compute_stats(db, tt)
+        stats = _compute_stats(db, tt.id)
 
-        # Core invariant: total = replied + not_replied
         assert stats["total_recipients"] == stats["replied_count"] + stats["not_replied_count"]
-
-        # Counts match actual data
         assert stats["total_recipients"] == len(statuses)
         expected_replied = sum(1 for s in statuses if s == "replied")
-        expected_not_replied = len(statuses) - expected_replied
         assert stats["replied_count"] == expected_replied
-        assert stats["not_replied_count"] == expected_not_replied
+        assert stats["not_replied_count"] == len(statuses) - expected_replied
     finally:
         db.close()
 
@@ -150,14 +134,13 @@ def test_dashboard_export_completeness(tt_names: list[str], statuses_per_tt: lis
     every Task_Type, every Recipient, and every Reply_Status."""
     db = _make_session()
     try:
-        # Align lengths
         count = min(len(tt_names), len(statuses_per_tt))
         tt_names = tt_names[:count]
         statuses_per_tt = statuses_per_tt[:count]
 
-        # Seed data
         created_tts = []
-        all_expected_recipients = {}  # tt_id -> list of (email, status)
+        all_expected: dict[int, list[tuple[str, str]]] = {}  # tt_id -> [(email, status)]
+
         for idx, (name, statuses) in enumerate(zip(tt_names, statuses_per_tt)):
             tt = TaskType(name=name, description=f"desc{idx}")
             db.add(tt)
@@ -179,7 +162,11 @@ def test_dashboard_export_completeness(tt_names: list[str], statuses_per_tt: lis
             expected = []
             for i, status in enumerate(statuses):
                 email = f"u{idx}_{i}@test.com"
-                r = Recipient(task_type_id=tt.id, name=f"U{idx}_{i}", email=email)
+                contact = Contact(name=f"U{idx}_{i}", email=email)
+                db.add(contact)
+                db.flush()
+
+                r = Recipient(task_type_id=tt.id, contact_id=contact.id)
                 db.add(r)
                 db.flush()
 
@@ -202,26 +189,19 @@ def test_dashboard_export_completeness(tt_names: list[str], statuses_per_tt: lis
 
             db.commit()
             created_tts.append(tt)
-            all_expected_recipients[tt.id] = expected
+            all_expected[tt.id] = expected
 
-        # Simulate export by querying all task types and their recipients
-        from app.api.dashboard import _get_recipient_status as get_status
-        task_types = db.query(TaskType).all()
-
-        # Every created task type must appear
-        export_tt_ids = {t.id for t in task_types}
+        # Every created task type must appear in a query
+        all_tt_ids = {t.id for t in db.query(TaskType).all()}
         for tt in created_tts:
-            assert tt.id in export_tt_ids
+            assert tt.id in all_tt_ids
 
-        # Every recipient and status must appear
+        # Every recipient and status must appear in _load_recipient_statuses
         for tt in created_tts:
-            recipients = db.query(Recipient).filter(Recipient.task_type_id == tt.id).all()
-            export_emails = {r.email for r in recipients}
-            for email, expected_status in all_expected_recipients[tt.id]:
-                assert email in export_emails
-                # Find the recipient and check status
-                rec = next(r for r in recipients if r.email == email)
-                rs = get_status(db, rec)
-                assert rs.reply_status == expected_status
+            statuses_result = _load_recipient_statuses(db, tt.id)
+            result_by_email = {rs.email: rs.reply_status for rs in statuses_result}
+            for email, expected_status in all_expected[tt.id]:
+                assert email in result_by_email
+                assert result_by_email[email] == expected_status
     finally:
         db.close()

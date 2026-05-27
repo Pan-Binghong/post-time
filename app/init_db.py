@@ -8,26 +8,28 @@ from app.models.models import TaskType, Template
 
 
 DEFAULT_TASK_TYPES = [
-    {"name": "按季度发送专利素材收集", "description": "按季度向各部门发送专利素材收集邮件，附带空白计划表"},
-    {"name": "按季度发送知识产权数据统计支持", "description": "按季度向药源/重庆等地区发送知识产权数据统计工作支持邮件"},
-    {"name": "任务类型3", "description": "第三种定时发送任务（待配置）"},
+    {"name": "按季度发送文档收集", "description": "按季度向各部门发送文档收集邮件，附带空白表格", "type_key": "patent"},
+    {"name": "按季度发送数据统计支持", "description": "按季度向各地区发送数据统计工作支持邮件", "type_key": "ip_stats"},
+    {"name": "任务类型3", "description": "第三种定时发送任务（待配置）", "type_key": None},
 ]
 
 
 def seed_task_types():
-    """Upsert the 3 builtin task types by id, ensuring names stay in sync with code."""
+    """Upsert the 3 builtin task types by id, ensuring names and type_key stay in sync."""
     db = SessionLocal()
     try:
         for i, tt in enumerate(DEFAULT_TASK_TYPES):
             expected_id = i + 1
-            # 已有正确名称则跳过
-            if db.query(TaskType).filter(TaskType.name == tt["name"]).first():
+            existing_by_name = db.query(TaskType).filter(TaskType.name == tt["name"]).first()
+            if existing_by_name:
+                if existing_by_name.type_key != tt.get("type_key"):
+                    existing_by_name.type_key = tt.get("type_key")
                 continue
-            # 按 id 找旧记录（内置任务固定为 id=1,2,3）
             existing = db.query(TaskType).filter(TaskType.id == expected_id).first()
             if existing:
                 existing.name = tt["name"]
                 existing.description = tt["description"]
+                existing.type_key = tt.get("type_key")
             else:
                 db.add(TaskType(**tt))
         db.commit()

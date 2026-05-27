@@ -42,9 +42,9 @@ export default function TaskConfig({ taskTypeId, taskTypeName }: Props) {
   const [credentials, setCredentials] = useState<CredentialItem[]>([]);
   const [selectedCredentialId, setSelectedCredentialId] = useState<number | null>(null);
   const [groupBy, setGroupBy] = useState<GroupBy>("location");
-  const [ipLocation, setIpLocation] = useState<string>("药源");
-  const isPatentTask  = taskTypeName === "按季度发送专利素材收集";
-  const isIpStatsTask = taskTypeName === "按季度发送知识产权数据统计支持";
+  const [ipLocation, setIpLocation] = useState<string>("区域A");
+  const isPatentTask  = taskTypeName === "按季度发送文档收集";
+  const isIpStatsTask = taskTypeName === "按季度发送数据统计支持";
   const isBuiltinTask = isPatentTask || isIpStatsTask;
   const [scheduledTimes, setScheduledTimes] = useState<(dayjs.Dayjs | null)[]>([null]);
   const [fileList, setFileList] = useState<{ file: File; name: string }[]>([]);
@@ -359,8 +359,8 @@ export default function TaskConfig({ taskTypeId, taskTypeName }: Props) {
                       onChange={setIpLocation}
                       style={{ width: "100%" }}
                       options={[
-                        { value: "药源", label: "药源" },
-                        { value: "重庆", label: "重庆" },
+                        { value: "区域A", label: "区域A" },
+                        { value: "区域B", label: "区域B" },
                       ]}
                     />
                   </div>

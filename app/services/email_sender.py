@@ -19,7 +19,8 @@ from email.header import Header
 from sqlalchemy.orm import Session
 
 from app.models.models import ReplyRecord, SendRecord
-from app.services.credential_manager import SMTP_HOST, SMTP_PORT
+from app.services.credential_manager import connect_smtp
+from app.services.provider_registry import resolve_smtp_config
 
 
 @dataclass
@@ -156,12 +157,17 @@ def send_email(
     except Exception as e:
         return SendResult(status="failed", failure_reason=f"Failed to build email: {e}")
 
+    try:
+        smtp_config = resolve_smtp_config(credentials.email)
+    except ValueError as e:
+        return SendResult(status="failed", failure_reason=str(e))
+
     retry_delays = [1, 3, 5]
     last_error = ""
 
     for attempt in range(max_retries):
         try:
-            server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=10)
+            server = connect_smtp(smtp_config)
             server.login(credentials.email, credentials.smtp_code)
             server.sendmail(credentials.email, all_emails, msg.as_string())
             server.quit()
@@ -174,7 +180,7 @@ def send_email(
         except (smtplib.SMTPException, OSError) as e:
             last_error = str(e)
             if attempt < max_retries - 1:
-                time.sleep(retry_delays[attempt])
+                time.sleep(retry_delays[min(attempt, len(retry_delays) - 1)])
 
     return SendResult(
         status="failed",

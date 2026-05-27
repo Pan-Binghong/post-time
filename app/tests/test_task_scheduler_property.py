@@ -198,10 +198,9 @@ def test_attachment_count_consistency(
         assert len(missing) == 0
 
         # Build the email message
-        msg, message_id = build_email_message(
+        msg, message_id, _ = build_email_message(
             sender_email=sender,
-            recipient_email=recipient,
-            recipient_name=name,
+            to_recipients=[{"name": name, "email": recipient}],
             subject=subject,
             body=body,
             attachments=attachment_paths,
