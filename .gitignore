@@ -26,6 +26,7 @@ example_eml/
 # Frontend
 frontend/node_modules/
 frontend/dist/
+package-lock.json
 
 # IDE / tools
 .vscode/

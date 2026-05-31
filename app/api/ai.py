@@ -9,9 +9,15 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
-AI_BASE_URL = os.environ["AI_BASE_URL"]
-AI_MODEL = os.environ["AI_MODEL"]
-AI_API_KEY = os.environ["AI_API_KEY"]
+
+def _ai_config() -> tuple[str, str, str]:
+    """运行时读取 AI 配置，避免模块加载时因未配置而崩溃。"""
+    base_url = os.getenv("AI_BASE_URL")
+    model = os.getenv("AI_MODEL")
+    api_key = os.getenv("AI_API_KEY")
+    if not base_url or not model or not api_key:
+        raise RuntimeError("AI 功能未配置，请在 .env 中设置 AI_BASE_URL / AI_MODEL / AI_API_KEY")
+    return base_url, model, api_key
 
 SYSTEM_PROMPT = """\
 你是一个专业的商务邮件助手。用户会描述他们想要的邮件内容，你的任务是生成一封完整的邮件。
@@ -55,9 +61,16 @@ class ChatRequest(BaseModel):
 
 @router.post("/chat")
 async def ai_chat(req: ChatRequest):
-    """代理转发到 qwen3，流式返回 SSE 数据。"""
+    """代理转发到大模型，流式返回 SSE 数据。"""
+    try:
+        ai_base_url, ai_model, ai_api_key = _ai_config()
+    except RuntimeError as e:
+        async def _err():
+            yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+        return StreamingResponse(_err(), media_type="text/event-stream")
+
     payload = {
-        "model": AI_MODEL,
+        "model": ai_model,
         "messages": [{"role": "system", "content": SYSTEM_PROMPT}]
                     + [{"role": m.role, "content": m.content} for m in req.messages],
         "stream": True,
@@ -68,9 +81,9 @@ async def ai_chat(req: ChatRequest):
             try:
                 async with client.stream(
                     "POST",
-                    f"{AI_BASE_URL}/chat/completions",
+                    f"{ai_base_url}/chat/completions",
                     json=payload,
-                    headers={"Authorization": f"Bearer {AI_API_KEY}"},
+                    headers={"Authorization": f"Bearer {ai_api_key}"},
                 ) as resp:
                     async for line in resp.aiter_lines():
                         if not line:

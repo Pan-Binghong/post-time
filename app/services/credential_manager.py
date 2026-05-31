@@ -55,7 +55,8 @@ def authenticate(email: str, smtp_code: str) -> AuthResult:
     """
     try:
         smtp_config = resolve_smtp_config(email)
-        server = connect_smtp(smtp_config)
+        # 凭证校验用较短超时，快速失败，避免接口长时间挂起
+        server = connect_smtp(smtp_config, timeout=5)
         server.login(email, smtp_code)
         server.quit()
         return AuthResult(success=True, message="Authentication successful.")
